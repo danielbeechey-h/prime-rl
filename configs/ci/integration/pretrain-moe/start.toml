@@ -1,5 +1,5 @@
-# Tiny prime_moe with its options (Gated Residual, null experts, gated attention, XSA, LatentMoE) in FP8 on 2 GPUs,
-# trained from scratch. The test writes the token shards (Reverse-Text-SFT, Qwen3 tokenizer) and passes their folder
+# Tiny prime_moe with its options (Gated Residual, null experts, gated attention, XSA, LatentMoE) and quantile
+# balancing with the sequence-wise balance loss in FP8 on 2 GPUs, trained from scratch. The test writes the token shards (Reverse-Text-SFT, Qwen3 tokenizer) and passes their folder
 # as --data.paths.
 max_steps = 20
 
@@ -8,6 +8,10 @@ name = "configs/ci/integration/pretrain-moe/model"
 ac = "None"
 
 [model.init]
+
+[model.moe_balance]
+bias_update = "quantile"
+seq_aux_coeff = 1e-3
 
 [model.quantization]
 type = "fp8"

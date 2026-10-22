@@ -34,5 +34,6 @@
   "hc_lowrank": 32,
   "attn_output_gate": true,
   "exclusive_attention": true,
-  "latent_dim": 128
+  "latent_dim": 128,
+  "router_bias_on_logits": true
 }
