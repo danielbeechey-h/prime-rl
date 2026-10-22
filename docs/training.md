@@ -277,7 +277,7 @@ Pulled from the console log and mirrored to W&B.
 **Progress and loss:**
 
 - `loss/mean`, `loss/perplexity` — main signal. Should decrease through the run.
-- `val/loss`, `val/perplexity` — validation metrics when `[val]` is set, logged every `val.interval` steps.
+- `val/loss`, `val/perplexity` — validation metrics when `val.data` is set, logged every `val.interval` steps; `val/<set>/...` for `val.sets` (see [Pretraining](#pretraining)).
 - `eval/{env}/...` — online eval metrics when `[eval]` is set, logged at each evaluated checkpoint step.
 - `progress/epoch`, `progress/num_samples`, `progress/num_tokens` — dataset progress.
 - `progress/<subset>/ratio_{samples,tokens}` — when training on multiple HF subsets/splits, the realized mixing ratio.
@@ -300,6 +300,7 @@ Pulled from the console log and mirrored to W&B.
 | `perf/peak_memory` | peak GPU memory (GiB) |
 | `time/step`, `time/forward_backward`, `time/save_ckpt` | step breakdown |
 | `time/data/{max,mean}` | time the step waited for data, max and mean over ranks |
+| `time/val` | time of a validation round |
 | `params/*` | total, embedding, non-embedding and active non-embedding parameter counts, at step 0 |
 
 ## Pretraining
@@ -346,17 +347,18 @@ interval = 1000
 
 **Gradient sync.** `model.defer_grad_sync = true` reduce-scatters the gradients once per optimizer step instead of after every micro-batch. It saves communication with gradient accumulation (most with experts across nodes), but keeps the unsharded parameters and gradients in memory across the micro-batches, so a config that fits without it can run out of memory.
 
-**Log-likelihood evals.** `[ll_eval]` scores eval sets with forward passes without gradients on the training model, every `interval` steps, at the last step and (with `eval_on_start`, the default) on the weights the run starts from. Evals run after the optimizer update, so step N's metrics describe the step-N checkpoint. A set is the name of a pretrain-evals set (`ppl`, `ctxcont` or `pairs`, in `<data_dir>/<set>/{test.parquet,meta.json}`) or a held-out folder of token shards, scored like a `ppl` set: every document on its own, every token after its first. Every set is scored at each of `seq_lens` (default `data.seq_len`). Requests start with BOS only if the training documents do. Requires `model.cp = 1`.
+**Validation sets.** `[val]` also scores log-likelihood sets on the training model (`val.sets`), with or without `val.data`. A set is the name of a pretrain-evals set (`ppl`, `ctxcont` or `pairs`, in `<data_dir>/<set>/{test.parquet,meta.json}`) or a held-out folder of token shards, scored like a `ppl` set: every document on its own, every token after its first. Every set is scored at each of `seq_lens` (default `data.seq_len`). Requests start with BOS only if the training documents do. As for `val.data`, step N scores the weights before step N's update. Requires `model.cp = 1`.
 
 ```toml
-[ll_eval]
+[val]
 interval = 1000
+eval_on_start = true
 data_dir = "/shared/evals-data"
 sets = ["lambada", { name = "heldout", path = "data/heldout" }]
 seq_lens = [2048, 8192]
 ```
 
-The metrics are `eval/<set>/<metric>@<length>`, e.g. `eval/heldout/bpb@8k`: `loss` (nats per token), `bpb` (bits per UTF-8 byte, comparable across tokenizers), and `acc`, `acc_norm` and `greedy_em` for multiple-choice and gold-answer sets. `time/ll_eval` is the time per round. Training metrics are the SFT ones above.
+The metrics are `val/<set>/<metric>@<length>`, e.g. `val/heldout/bpb@8k`: `loss` (nats per token), `bpb` (bits per UTF-8 byte, comparable across tokenizers), and `acc`, `acc_norm` and `greedy_em` for multiple-choice and gold-answer sets. `time/val` is the time of a validation round. Training metrics are the SFT ones above.
 
 **MoE load balancing.** `[model.moe_balance]` updates the routers' selection biases after every step (aux-loss-free balancing, DeepSeek-V3). `bias_update = "sign"` (default) moves each layer's bias by `bias_update_rate` towards underloaded experts and works with every MoE model that has a selection bias. `bias_update = "quantile"` (`prime_moe` only, best with `router_bias_on_logits`) sets the bias so that every expert would have taken its share of the step's tokens; `quantile_estimator` and `quantile_bins` set how. `bias_freeze` stops the updates for that fraction of `max_steps` at the end. `seq_aux_coeff` (`prime_moe` only) adds DeepSeek-V3's sequence-wise balance loss per packed row, over the whole row under context parallelism. The metrics are `router/bias/{absmax,std}`, `router/qb/*` for the histogram estimator and `loss/seq_balance` (1 is balanced).
 
