@@ -1,0 +1,47 @@
+# prime_moe with 64 routed experts (6 active) and 2 shared experts, d = 512 and 8 layers (moe-d512/config.json),
+# trained from scratch on the Dolma 3 mixture tokenized with the DeepSeek-V4 tokenizer: 4096 steps x 256K tokens.
+#
+#   uv run sft @ examples/pretrain/prime_moe.toml
+
+max_steps = 4096
+
+[model]
+name = "examples/pretrain/moe-d512"  # the architecture: config.json only, no weights
+ac = "None"
+defer_grad_sync = true
+
+[model.init]
+
+[tokenizer]
+name = "tokenizers/deepseek-v4-flash-base"  # a local copy of deepseek-ai/DeepSeek-V4-Flash-Base without config.json
+
+[data]
+type = "tokens"
+seq_len = 8192
+batch_size = 32
+micro_batch_size = 8
+paths = [
+  "data/dolma3-50b-dsv4/web",
+  "data/dolma3-50b-dsv4/pdfs",
+  "data/dolma3-50b-dsv4/code",
+  "data/dolma3-50b-dsv4/math",
+  "data/dolma3-50b-dsv4/reference",
+]
+
+[optim]
+type = "muon"
+lr = 0.0078125
+max_norm = 1.0
+weight_decay = 0.1
+
+[scheduler]
+type = "linear"
+warmup_steps = 410
+decay_steps = 3686
+
+[ll_eval]
+interval = 512
+sets = [{ name = "heldout", path = "data/dolma3-50b-dsv4/mix-val-5M" }]
+
+[ckpt]
+interval = 1024

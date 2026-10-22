@@ -1,0 +1,32 @@
+# Tiny prime_moe with its options (Gated Residual, null experts, gated attention, XSA, LatentMoE) in FP8 on 2 GPUs,
+# trained from scratch. The test writes the token shards (Reverse-Text-SFT, Qwen3 tokenizer) and passes their folder
+# as --data.paths.
+max_steps = 20
+
+[model]
+name = "configs/ci/integration/pretrain-moe/model"
+ac = "None"
+
+[model.init]
+
+[model.quantization]
+type = "fp8"
+
+[model.moe.compute]
+type = "deepgemm_fp8"
+
+[tokenizer]
+name = "PrimeIntellect/Qwen3-0.6B"
+
+[data]
+type = "tokens"
+paths = ["set-by-the-test"]
+seq_len = 2048
+batch_size = 8
+micro_batch_size = 2
+
+[optim]
+type = "muon"
+lr = 0.004
+
+[ckpt]

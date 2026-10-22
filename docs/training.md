@@ -358,6 +358,8 @@ seq_lens = [2048, 8192]
 
 The metrics are `eval/<set>/<metric>@<length>`, e.g. `eval/heldout/bpb@8k`: `loss` (nats per token), `bpb` (bits per UTF-8 byte, comparable across tokenizers), and `acc`, `acc_norm` and `greedy_em` for multiple-choice and gold-answer sets. `time/ll_eval` is the time per round. Training metrics are the SFT ones above.
 
+**`prime_moe`.** `model_type = "prime_moe"` is a research MoE for pretraining. With every option off it is GLM-4.5's MoE architecture with `glm4_moe`'s state-dict layout; its options (Gated Residual connections, null experts, gated attention, exclusive self attention, LatentMoE, SiTU-GLU experts) are documented in `PrimeMoeConfig`. With Muon, its Gated Residual projections train with AdamW. Null experts add the `router/k/*` metrics. Example: [`examples/pretrain/prime_moe.toml`](../examples/pretrain/prime_moe.toml).
+
 For multi-node runs, use `[deployment]` and `[slurm]` as for SFT (see [Scaling § SLURM](scaling.md#slurm)).
 
 ## Checkpointing
