@@ -272,3 +272,6 @@ class PrimeMoeForCausalLM(PrimeMoePreTrainedModel):
         rotary_emb = self.model.rotary_emb
         inv_freq, rotary_emb.attention_scaling = rotary_emb.rope_init_fn(rotary_emb.config, rotary_emb.inv_freq.device)
         rotary_emb.inv_freq.copy_(inv_freq)
+        for module in self.modules():
+            if isinstance(module, PrimeMoE) and module.routed_k_counts is not None:
+                module.routed_k_counts.zero_()
