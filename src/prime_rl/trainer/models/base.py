@@ -104,6 +104,11 @@ class PreTrainedModelPrimeRL(PreTrainedModel):
         """PrimeRL models always use eager experts implementation."""
         return "eager"
 
+    @classmethod
+    def trains_with_adamw(cls, name: str) -> bool:
+        """Whether Muon leaves the weight matrix ``name`` to its AdamW group."""
+        return False
+
     def num_active_params(self) -> int:
         """Parameters a text token multiplies through, LoRA adapters included."""
         return count_active_params(self)

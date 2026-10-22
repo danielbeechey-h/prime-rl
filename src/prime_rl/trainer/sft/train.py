@@ -35,7 +35,13 @@ from prime_rl.trainer.model import (
 )
 from prime_rl.trainer.parallel_dims import get_parallel_dims, resolve_ep
 from prime_rl.trainer.perf import get_perf_counter
-from prime_rl.trainer.metrics import DeadExperts, SpikeDetector, grad_norms_by_group, take_routing_counts
+from prime_rl.trainer.metrics import (
+    DeadExperts,
+    SpikeDetector,
+    grad_norms_by_group,
+    routed_k_metrics,
+    take_routing_counts,
+)
 from prime_rl.trainer.micro_batches import run_micro_batches
 from prime_rl.trainer.sft.data import (
     TokenDataset,
@@ -641,6 +647,7 @@ def train(config: SFTConfig):
         step_metrics = {**result.metrics, "step": progress.step}
         if result.tokens_per_expert is not None:
             step_metrics["expert_load/dead"] = dead_experts.update(result.tokens_per_expert)
+            step_metrics |= routed_k_metrics(moes, dp_cp_group)
         asyncio.run(monitors.log(step_metrics, step=progress.step))
 
         is_first_step = False

@@ -6,6 +6,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.optim import AdamW, Optimizer
 
 from prime_rl.configs.trainer import OffloadMode, OptimizerConfig
+from prime_rl.trainer.models.base import PreTrainedModelPrimeRL
 from prime_rl.trainer.models.fusions import get_model_packed_parameters
 from prime_rl.trainer.optim.base import OffloadOptimizer as OffloadOptimizer
 from prime_rl.trainer.optim.base import OptimizerLike
@@ -152,6 +153,8 @@ def _create_muon_optimizer(
             return False
         # Expert biases should not go to Muon (and would also raise under EP).
         if "mlp.experts" in n and n.endswith("_bias"):
+            return False
+        if isinstance(model, PreTrainedModelPrimeRL) and model.trains_with_adamw(n):
             return False
         return True
 
