@@ -67,6 +67,7 @@ class PrimeMoeDecoderLayer(GradientCheckpointingLayer):
                     top_k=config.num_experts_per_tok,
                     route_norm=config.norm_topk_prob,
                     route_scale=config.routed_scaling_factor,
+                    bias_on_logits=config.router_bias_on_logits,
                 ),
                 experts=GroupedExperts(
                     dim=config.latent_dim or config.hidden_size,
@@ -273,5 +274,8 @@ class PrimeMoeForCausalLM(PrimeMoePreTrainedModel):
         inv_freq, rotary_emb.attention_scaling = rotary_emb.rope_init_fn(rotary_emb.config, rotary_emb.inv_freq.device)
         rotary_emb.inv_freq.copy_(inv_freq)
         for module in self.modules():
-            if isinstance(module, PrimeMoE) and module.routed_k_counts is not None:
-                module.routed_k_counts.zero_()
+            if isinstance(module, PrimeMoE):
+                module.router.quantile_sum.zero_()
+                module.router.quantile_count.zero_()
+                if module.routed_k_counts is not None:
+                    module.routed_k_counts.zero_()

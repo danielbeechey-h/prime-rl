@@ -42,7 +42,7 @@ class StepResult:
 def run_micro_batches(
     model: nn.Module,
     micro_batches: Iterator[dict],
-    compute_loss: Callable[[dict], tuple[Tensor, Tensor]],
+    compute_loss: Callable[[dict], tuple[Tensor, Tensor, Tensor | None]],
     grad_accum_steps: int,
     parallel_dims: ParallelDims,
     perf_counter: PerfCounter,
@@ -52,7 +52,8 @@ def run_micro_batches(
 ) -> StepResult:
     """Forward and backward passes over the ``grad_accum_steps`` micro-batches of one step, leaving the gradients of
     the summed token loss divided by the global token count. ``compute_loss`` returns the summed loss and the number
-    of unmasked tokens of a micro-batch. With a ``gradient_manager``, the caller has set the gradient scale up front.
+    of unmasked tokens of a micro-batch, and an auxiliary loss on the scale of the summed loss that is trained but not
+    logged (or None). With a ``gradient_manager``, the caller has set the gradient scale up front.
     With ``defer_grad_sync``, FSDP reduce-scatters the gradients only at the last micro-batch."""
     dp_cp_group = parallel_dims.get_mesh("dp_cp").get_group()
     ep_group = parallel_dims.get_mesh("ep").get_group() if parallel_dims.ep_enabled else None
@@ -70,12 +71,13 @@ def run_micro_batches(
         num_flops += perf_counter.flop_counter(micro_batch["seq_lens"].tolist())
 
         with record_function("forward"):
-            micro_loss_sum, micro_token_count = compute_loss(micro_batch)
+            micro_loss_sum, micro_token_count, aux_loss_sum = compute_loss(micro_batch)
         loss_tokens += micro_token_count
         is_nan = torch.isnan(micro_loss_sum.detach())
         nan_count += is_nan
         loss_sum += torch.where(is_nan, 0.0, micro_loss_sum.detach())
-        scaled_loss = torch.where(is_nan, torch.nan_to_num(micro_loss_sum, nan=0.0), micro_loss_sum) / grad_accum_steps
+        trained_loss = micro_loss_sum if aux_loss_sum is None else micro_loss_sum + aux_loss_sum
+        scaled_loss = torch.where(is_nan, torch.nan_to_num(micro_loss_sum, nan=0.0), trained_loss) / grad_accum_steps
 
         is_last_micro_step = micro_step == grad_accum_steps - 1
         if defer_grad_sync:

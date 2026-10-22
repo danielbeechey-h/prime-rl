@@ -43,6 +43,7 @@ from prime_rl.trainer.metrics import (
     take_routing_counts,
 )
 from prime_rl.trainer.micro_batches import run_micro_batches
+from prime_rl.trainer.moe_balance import MoEBalancer
 from prime_rl.trainer.sft.data import (
     TokenDataset,
     get_dataset_progress,
@@ -221,6 +222,13 @@ def train(config: SFTConfig):
         logger.info(f"Loading validation dataset ({config.val.data})")
         val_raw_dataset = load_sft_dataset(config.val.data)
 
+    balancer = None
+    if config.model.moe_balance is not None:
+        start_step = checkpoint_step + 1 if checkpoint_step is not None else 1
+        balancer = MoEBalancer(
+            model, config.model.moe_balance, config.data.micro_batch_size, config.max_steps, start_step, parallel_dims
+        )
+
     # Optionally, resume training from a checkpoint
     progress = Progress()
 
@@ -260,8 +268,9 @@ def train(config: SFTConfig):
     cp_size = parallel_dims.cp
     moes = list(iter_moe_blocks(model))
 
-    def compute_loss(micro_batch: dict) -> tuple[torch.Tensor, torch.Tensor]:
-        """Forward pass returning (loss_sum, token_count) over unmasked tokens."""
+    def compute_loss(micro_batch: dict) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Forward pass returning (loss_sum, token_count) over unmasked tokens and the MoE sequence-wise balance loss
+        on the scale of loss_sum (None without it)."""
         input_ids = micro_batch["input_ids"].to("cuda", non_blocking=True)
         position_ids = micro_batch["position_ids"].to("cuda", non_blocking=True)
         target_ids = micro_batch["target_ids"].to("cuda", non_blocking=True)
@@ -306,7 +315,10 @@ def train(config: SFTConfig):
             loss_sum = out["loss"]
 
         del out
-        return loss_sum, token_count
+        aux_loss_sum = None
+        if balancer is not None and torch.is_grad_enabled():
+            aux_loss_sum = balancer.aux_loss_sum(input_ids.shape[1] // config.data.micro_batch_size)
+        return loss_sum, token_count, aux_loss_sum
 
     def run_eval_loop(data_iter):
         """Validation forward loop. Returns token-weighted global mean loss."""
@@ -327,7 +339,7 @@ def train(config: SFTConfig):
                 dist.all_reduce(has_data, op=dist.ReduceOp.MIN)
                 if has_data.item() == 0:
                     break
-                loss_sum, token_count = compute_loss(micro_batch)
+                loss_sum, token_count, _ = compute_loss(micro_batch)
                 if not torch.isnan(loss_sum.detach()):
                     total_loss_sum += loss_sum.detach()
                     total_token_count += token_count
@@ -490,6 +502,7 @@ def train(config: SFTConfig):
             defer_grad_sync=config.model.defer_grad_sync,
         )
         forward_backward_time = time.perf_counter() - forward_backward_start_time
+        balance_metrics = balancer.update(progress.step, result.tokens_per_expert) if balancer is not None else {}
         if result.nan_count > 0:
             logger.warning(f"{result.nan_count} micro-batches had a NaN loss and were excluded from the backward pass")
 
@@ -644,7 +657,7 @@ def train(config: SFTConfig):
         disk_metrics["step"] = progress.step
         asyncio.run(monitors.log(disk_metrics, step=progress.step))
 
-        step_metrics = {**result.metrics, "step": progress.step}
+        step_metrics = {**result.metrics, **balance_metrics, "step": progress.step}
         if result.tokens_per_expert is not None:
             step_metrics["expert_load/dead"] = dead_experts.update(result.tokens_per_expert)
             step_metrics |= routed_k_metrics(moes, dp_cp_group)

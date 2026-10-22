@@ -235,10 +235,46 @@ class LogLikelihoodEvalConfig(BaseConfig):
         return self
 
 
+class MoEBalanceConfig(BaseConfig):
+    """MoE load balancing as in DeepSeek-V3: an aux-loss-free update of the routers' selection biases, and optionally a
+    small sequence-wise balance loss."""
+
+    bias_update: Literal["sign", "quantile"] = "sign"
+    """``sign``: every step, each layer's selection bias moves by ``bias_update_rate`` towards underloaded experts, from
+    the step's global expert counts; works with every MoE model that has a selection bias. ``quantile`` (``prime_moe``
+    only): quantile balancing (Su 2026; Kimi K3, Marin): every step, each layer's bias is set so that every expert would
+    have been selected by ``top_k / num_experts`` of the step's tokens (null experts included), estimated as
+    ``quantile_estimator`` sets. Works best with the model's ``router_bias_on_logits``."""
+
+    quantile_estimator: Literal["histogram", "micro_batch_mean"] = "histogram"
+    """How ``quantile`` estimates the thresholds. ``histogram`` (Kimi K3 report, §2.3.3): per expert, a histogram of the
+    step's margins over all micro-batches and ranks, on the previous step's global margin range (``[-1, 1]`` at the
+    start); the quantile of the pooled step. ``micro_batch_mean``: each micro-batch's exact quantile, averaged over the
+    micro-batches and ranks."""
+
+    quantile_bins: int = Field(1024, ge=2)
+    """Bins of the ``histogram`` estimator's grid."""
+
+    bias_update_rate: float = Field(3e-3, ge=0)
+    """Step size of the ``sign`` update: every step, each layer's bias moves by this towards underloaded experts,
+    mean-centred."""
+
+    bias_freeze: float = Field(0.0, ge=0, lt=1)
+    """Fraction of ``max_steps`` at the end of training during which the biases stop updating, as DeepSeek-V3, GLM-4.5
+    and Moonlight do in their final stage."""
+
+    seq_aux_coeff: float = Field(0.0, ge=0)
+    """Weight of the sequence-wise balance loss (``prime_moe`` only), computed per packed row and, under context
+    parallelism, over the whole row. 0 turns it off."""
+
+
 class SFTModelConfig(ModelConfig):
     init: InitConfig | None = None
     """Initialize the weights from scratch (pretraining) instead of loading them from ``name``, which then only
     supplies the model config. A resumed run loads the weights from the checkpoint."""
+
+    moe_balance: MoEBalanceConfig | None = None
+    """MoE load balancing. If None, the selection biases stay as loaded."""
 
     defer_grad_sync: bool = False
     """Reduce-scatter the gradients once per optimizer step instead of after every micro-batch. Saves communication
@@ -581,6 +617,12 @@ class SFTConfig(BaseTrainerConfig):
                 raise ValueError("Micro batch size must be 1 when CP is enabled")
             if self.val is not None and self.val.data.micro_batch_size != 1:
                 raise ValueError("Validation micro batch size must be 1 when CP is enabled")
+        return self
+
+    @model_validator(mode="after")
+    def validate_moe_balance(self):
+        if self.model.moe_balance is not None and self.model.moe_balance.bias_freeze > 0 and self.max_steps is None:
+            raise ValueError("model.moe_balance.bias_freeze needs max_steps")
         return self
 
     @model_validator(mode="after")
