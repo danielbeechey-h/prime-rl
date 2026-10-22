@@ -42,6 +42,7 @@ decay_steps = 3686
 [val]
 interval = 512
 eval_on_start = true
+eval_on_end = true
 sets = [{ name = "heldout", path = "data/dolma3-50b-dsv4/mix-val-5M" }]
 
 [ckpt]
